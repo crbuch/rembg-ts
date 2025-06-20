@@ -11,7 +11,7 @@ import {
     getStructuringElement,
     morphologyEx,
 } from './libraries/cv2';
-import { Image, ImageOps } from './libraries/PIL';
+import { Image } from './libraries/PIL';
 import type { PILImage } from './libraries/PIL';
 import { estimate_alpha_cf, estimate_foreground_ml, stack_images } from './libraries/pymatting';
 import { binary_erosion } from './libraries/scipy.ndimage';
@@ -119,21 +119,7 @@ async function alpha_matting_cutout(
     return cutoutImage;
 }
 
-function naive_cutout(img: PILImage, mask: PILImage): PILImage {
-    /**
-     * Perform a simple cutout operation on an image using a mask.
-     *
-     * This function takes a PIL image `img` and a PIL image `mask` as input.
-     * It uses the mask to create a new image where the pixels from `img` are
-     * cut out based on the mask.
-     *
-     * The function returns a PIL image representing the cutout of the original
-     * image using the mask.
-     */
-    const empty = Image.new("RGBA", img.size, 0);
-    const cutout = Image.composite(img, empty, mask);
-    return cutout;
-}
+
 
 function putalpha_cutout(img: PILImage, mask: PILImage): PILImage {
     /**
@@ -200,34 +186,9 @@ function post_process(mask: NumpyArray): NumpyArray {
     return processed_mask;
 }
 
-function apply_background_color(img: PILImage, color: [number, number, number, number]): PILImage {
-    /**
-     * Apply the specified background color to the image.
-     *
-     * Args:
-     *     img (PILImage): The image to be modified.
-     *     color ([number, number, number, number]): The RGBA color to be applied.
-     *
-     * Returns:
-     *     PILImage: The modified image with the background color applied.
-     */
-    const background = Image.new("RGBA", img.size, color);
-    const colored_image = Image.alpha_composite(background, img);
-    return colored_image;
-}
 
-function fix_image_orientation(img: PILImage): PILImage {
-    /**
-     * Fix the orientation of the image based on its EXIF data.
-     *
-     * Args:
-     *     img (PILImage): The image to be fixed.
-     *
-     * Returns:
-     *     PILImage: The fixed image.
-     */
-    return ImageOps.exif_transpose(img);
-}
+
+
 
 async function download_models(models: string[]): Promise<void> {
     /**
@@ -257,38 +218,35 @@ async function download_models(models: string[]): Promise<void> {
 
 async function remove(
     data: Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[],
-    alpha_matting = false,
     alpha_matting_foreground_threshold = 240,
     alpha_matting_background_threshold = 10,
     alpha_matting_erode_size = 10,
     session?: BaseSession,
     only_mask = false,
     post_process_mask = false,
-    bgcolor?: [number, number, number, number],
     force_return_bytes = false,
     ...args: unknown[]
-): Promise<Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[]> {/**
-     * Remove the background from an input image or batch of images.
+): Promise<Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[]> {    /**
+     * Remove the background from an input image or batch of images using alpha matting.
      *
-     * This function takes in various parameters and returns a modified version of the input image(s) with the background removed. 
-     * The function can handle input data in the form of bytes, a PIL image, or a numpy array, or arrays of these types for batch processing.
-     * For batch processing, all images are first processed through the segmentation model, then through alpha matting if enabled.
+     * This function processes images through segmentation and alpha matting for high-quality background removal.
+     * For batch processing, all images are first processed through the segmentation model, then through alpha matting.
      * This approach is more efficient than processing each image individually through both models.
-     *     * Parameters:
+     * 
+     * Parameters:
      *     data (Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[]): The input image data or batch of images.
-     *     alpha_matting (boolean, optional): Flag indicating whether to use alpha matting. Defaults to false.
      *     alpha_matting_foreground_threshold (number, optional): Foreground threshold for alpha matting. Defaults to 240.
      *     alpha_matting_background_threshold (number, optional): Background threshold for alpha matting. Defaults to 10.
      *     alpha_matting_erode_size (number, optional): Erosion size for alpha matting. Defaults to 10.
-     *     session (BaseSession?, optional): A session object for the 'u2net' model. Defaults to undefined.
+     *     session (BaseSession?, optional): A session object for the model. Defaults to undefined.
      *     only_mask (boolean, optional): Flag indicating whether to return only the binary masks. Defaults to false.
      *     post_process_mask (boolean, optional): Flag indicating whether to post-process the masks. Defaults to false.
-     *     bgcolor ([number, number, number, number]?, optional): Background color for the cutout image. Defaults to undefined.
      *     force_return_bytes (boolean, optional): Flag indicating whether to return the cutout image as bytes. Defaults to false.
      *     ...args (unknown[]): Additional arguments.
-     *     * Returns:
+     *
+     * Returns:
      *     Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[]: The cutout image(s) with the background removed. Returns an array if input was an array.
-     */    // Check if input is a batch (array)
+     */// Check if input is a batch (array)
     const isBatch = Array.isArray(data);
     const inputArray = isBatch ? data as (Uint8Array | PILImage | NumpyArray)[] : [data as (Uint8Array | PILImage | NumpyArray)];
     
@@ -315,19 +273,11 @@ async function remove(
             throw new Error(
                 `Input type ${typeof item} is not supported. Try using force_return_bytes=true to force bytes output`
             );
-        }
-        
-        // Fix image orientation
-        img = fix_image_orientation(img);
-        
+        }        
+        // Images are now ready for processing
         images.push(img);
         returnTypes.push(return_type);
     }
-
-    // Extract putalpha from args (kwargs equivalent)
-    const putalpha = args.find((arg) => 
-        typeof arg === 'object' && arg !== null && 'putalpha' in arg && (arg as Record<string, unknown>).putalpha
-    ) ? true : false;
 
     // Initialize session if needed
     if (session === undefined) {
@@ -358,12 +308,10 @@ async function remove(
                 mask = Image.fromarray(post_process(np.array(mask)));
             }
 
-            let cutout: PILImage;
-
-            if (only_mask) {
+            let cutout: PILImage;            if (only_mask) {
                 console.log(`Image ${i + 1}: Using only_mask mode`);
                 cutout = mask;
-            } else if (alpha_matting) {
+            } else {
                 console.log(`Image ${i + 1}: Using alpha_matting_cutout`);
                 try {
                     cutout = await alpha_matting_cutout(
@@ -375,19 +323,8 @@ async function remove(
                     );
                 } catch (error) {
                     console.error(`Image ${i + 1}: Alpha matting failed with error:`, error);
-                    console.log(`Image ${i + 1}: Alpha matting failed, falling back to`, putalpha ? 'putalpha_cutout' : 'naive_cutout');
-                    if (putalpha) {
-                        cutout = putalpha_cutout(img, mask);
-                    } else {
-                        cutout = naive_cutout(img, mask);
-                    }
-                }
-            } else {
-                console.log(`Image ${i + 1}: Using`, putalpha ? 'putalpha_cutout' : 'naive_cutout');
-                if (putalpha) {
+                    console.log(`Image ${i + 1}: Alpha matting failed, falling back to putalpha_cutout`);
                     cutout = putalpha_cutout(img, mask);
-                } else {
-                    cutout = naive_cutout(img, mask);
                 }
             }
 
@@ -410,11 +347,7 @@ async function remove(
         if (cutouts.length > 0) {
             cutout = get_concat_v_multi(cutouts);
             console.log(`Image ${i + 1}: Final cutout created, size:`, cutout.width, 'x', cutout.height);
-        }
-
-        if (bgcolor !== undefined && !only_mask) {
-            cutout = apply_background_color(cutout, bgcolor);
-        }
+        }        // Final cutout is ready
 
         // Convert to appropriate return type
         if (ReturnType.PILLOW === return_type) {
@@ -443,13 +376,10 @@ async function remove(
 export {
     ReturnType,
     alpha_matting_cutout,
-    naive_cutout,
     putalpha_cutout,
     get_concat_v_multi,
     get_concat_v,
     post_process,
-    apply_background_color,
-    fix_image_orientation,
     download_models,
     remove,
 };

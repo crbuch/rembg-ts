@@ -12,13 +12,10 @@ export {
     new_session_async,
     ReturnType,
     alpha_matting_cutout,
-    naive_cutout,
     putalpha_cutout,
     get_concat_v_multi,
     get_concat_v,
     post_process,
-    apply_background_color,
-    fix_image_orientation,
     download_models
 } from './bg';
 

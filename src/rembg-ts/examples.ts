@@ -24,9 +24,7 @@ async function example_bytes_to_bytes() {
 
     // Load an image as bytes (in a real application, this might come from a file input)
     const response = await fetch('/path/to/input.png');
-    const inputBytes = new Uint8Array(await response.arrayBuffer());
-
-    // Remove background
+    const inputBytes = new Uint8Array(await response.arrayBuffer());    // Remove background (alpha matting is now always enabled)
     const outputBytes = await remove(inputBytes) as Uint8Array;
 
     // The outputBytes can now be used to create a blob, save to file, etc.
@@ -44,9 +42,7 @@ async function example_pil_to_pil() {
     // Load image as PIL Image
     const response = await fetch('/path/to/input.png');
     const blob = await response.blob();
-    const inputImage = Image.open(blob);
-
-    // Remove background
+    const inputImage = Image.open(blob);    // Remove background (alpha matting is now always enabled)
     const outputImage = await remove(inputImage) as PILImage;
 
     // Save the result
@@ -66,9 +62,7 @@ async function example_numpy_to_numpy() {
     const response = await fetch('/path/to/input.png');
     const blob = await response.blob();
     const img = Image.open(blob);
-    const inputArray = np.asarray(img);
-
-    // Remove background
+    const inputArray = np.asarray(img);    // Remove background (alpha matting is now always enabled)
     const outputArray = await remove(inputArray) as NumpyArray;
     // Convert back to image for display
     const outputImage = Image.fromarray(outputArray);
@@ -84,12 +78,9 @@ async function example_alpha_matting() {
 
     const response = await fetch('/path/to/input.png');
     const blob = await response.blob();
-    const inputImage = Image.open(blob);
-
-    // Remove background with alpha matting enabled
+    const inputImage = Image.open(blob);    // Remove background with custom alpha matting parameters
     const outputImage = await remove(
         inputImage,
-        true,  // alpha_matting
         240,   // alpha_matting_foreground_threshold
         10,    // alpha_matting_background_threshold
         10     // alpha_matting_erode_size
@@ -109,12 +100,9 @@ async function example_with_custom_session() {
 
     const response = await fetch('/path/to/input.png');
     const blob = await response.blob();
-    const inputImage = Image.open(blob);
-
-    // Use the custom session
+    const inputImage = Image.open(blob);    // Use the custom session
     const outputImage = await remove(
         inputImage,
-        false, // alpha_matting
         240,   // alpha_matting_foreground_threshold
         10,    // alpha_matting_background_threshold
         10,    // alpha_matting_erode_size
@@ -132,12 +120,9 @@ async function example_mask_only() {
 
     const response = await fetch('/path/to/input.png');
     const blob = await response.blob();
-    const inputImage = Image.open(blob);
-
-    // Get only the mask
+    const inputImage = Image.open(blob);    // Get only the mask
     const mask = await remove(
         inputImage,
-        false, // alpha_matting
         240,   // alpha_matting_foreground_threshold
         10,    // alpha_matting_background_threshold
         10,    // alpha_matting_erode_size
@@ -149,29 +134,27 @@ async function example_mask_only() {
 }
 
 /**
- * Example 7: Apply a background color
+ * Example 7: Using post-processing for smoother masks
  */
-async function example_with_background_color() {
-    console.log("Example 7: Background Color");
+async function example_with_post_processing() {
+    console.log("Example 7: Post Processing");
 
     const response = await fetch('/path/to/input.png');
     const blob = await response.blob();
     const inputImage = Image.open(blob);
 
-    // Remove background and apply a red background
+    // Remove background with post-processing enabled for smoother masks
     const outputImage = await remove(
         inputImage,
-        false, // alpha_matting
         240,   // alpha_matting_foreground_threshold
         10,    // alpha_matting_background_threshold
         10,    // alpha_matting_erode_size
         undefined, // session
         false, // only_mask
-        false, // post_process_mask
-        [255, 0, 0, 255] // Red background (RGBA)
+        true   // post_process_mask - enables morphological operations for smoother edges
     ) as PILImage;
 
-    console.log('Background color result:', outputImage);
+    console.log('Post-processed result:', outputImage);
 }
 
 /**
@@ -182,19 +165,15 @@ async function example_force_bytes() {
 
     const response = await fetch('/path/to/input.png');
     const blob = await response.blob();
-    const inputImage = Image.open(blob);
-
-    // Force output as bytes even though input is PIL image
+    const inputImage = Image.open(blob);    // Force output as bytes even though input is PIL image
     const outputBytes = await remove(
         inputImage,
-        false, // alpha_matting
         240,   // alpha_matting_foreground_threshold
         10,    // alpha_matting_background_threshold
         10,    // alpha_matting_erode_size
         undefined, // session
         false, // only_mask
         false, // post_process_mask
-        undefined, // bgcolor
         true   // force_return_bytes
     ) as Uint8Array;
 
@@ -202,10 +181,38 @@ async function example_force_bytes() {
 }
 
 /**
- * Example 9: Processing multiple images efficiently with session reuse
+ * Example 9: Batch processing multiple images in one call
  */
 async function example_batch_processing() {
     console.log("Example 9: Batch Processing");
+
+    // Load multiple images
+    const imagePaths = ['/path/to/image1.png', '/path/to/image2.png', '/path/to/image3.png'];
+    const inputImages: PILImage[] = [];
+
+    for (const imagePath of imagePaths) {
+        const response = await fetch(imagePath);
+        const blob = await response.blob();
+        const inputImage = Image.open(blob);
+        inputImages.push(inputImage);
+    }
+
+    // Process all images in one batch call (more efficient)
+    const outputImages = await remove(
+        inputImages,
+        240,   // alpha_matting_foreground_threshold
+        10,    // alpha_matting_background_threshold
+        10     // alpha_matting_erode_size
+    ) as PILImage[];
+
+    console.log(`Processed ${outputImages.length} images in batch:`, outputImages);
+}
+
+/**
+ * Example 10: Processing multiple images efficiently with session reuse (individual calls)
+ */
+async function example_sequential_processing() {
+    console.log("Example 10: Sequential Processing with Session Reuse");
 
     // Create session once for reuse
     const session = await new_session_async("u2net");
@@ -220,7 +227,6 @@ async function example_batch_processing() {
         // Reuse the same session for all images
         const outputImage = await remove(
             inputImage,
-            false, // alpha_matting
             240,   // alpha_matting_foreground_threshold
             10,    // alpha_matting_background_threshold
             10,    // alpha_matting_erode_size
@@ -232,8 +238,34 @@ async function example_batch_processing() {
 }
 
 /**
- * Example 10: Error handling
+ * Example 11: Post-processing the result (custom background, effects, etc.)
  */
+async function example_post_processing() {
+    console.log("Example 11: Post Processing");
+
+    const response = await fetch('/path/to/input.png');
+    const blob = await response.blob();
+    const inputImage = Image.open(blob);
+
+    // Remove background first
+    const cutoutImage = await remove(
+        inputImage,
+        240,   // alpha_matting_foreground_threshold
+        10,    // alpha_matting_background_threshold
+        10     // alpha_matting_erode_size
+    ) as PILImage;
+
+    // Post-process: Add a solid color background
+    const width = cutoutImage.width;
+    const height = cutoutImage.height;
+      // Create a new image with a colored background (RGBA for proper compositing)
+    const backgroundImage = Image.new("RGBA", [width, height], [255, 0, 0, 255]); // Red background
+    
+    // Paste the cutout on top of the background
+    backgroundImage.paste(cutoutImage, [0, 0]);
+
+    console.log('Post-processed with red background:', backgroundImage);
+}
 async function example_error_handling() {
     console.log("Example 10: Error Handling");
 
@@ -266,9 +298,11 @@ export {
     example_alpha_matting,
     example_with_custom_session,
     example_mask_only,
-    example_with_background_color,
+    example_with_post_processing,
     example_force_bytes,
     example_batch_processing,
+    example_sequential_processing,
+    example_post_processing,
     example_error_handling
 };
 
@@ -283,9 +317,11 @@ export async function runAllExamples() {
         await example_alpha_matting();
         await example_with_custom_session();
         await example_mask_only();
-        await example_with_background_color();
+        await example_with_post_processing();
         await example_force_bytes();
         await example_batch_processing();
+        await example_sequential_processing();
+        await example_post_processing();
         await example_error_handling();
 
         console.log("=== All examples completed ===");
@@ -305,9 +341,11 @@ if (typeof window !== 'undefined') {
         example_alpha_matting,
         example_with_custom_session,
         example_mask_only,
-        example_with_background_color,
+        example_with_post_processing,
         example_force_bytes,
         example_batch_processing,
+        example_sequential_processing,
+        example_post_processing,
         example_error_handling
     };
 

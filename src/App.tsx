@@ -67,10 +67,9 @@ function App() {
 
       // Create session for the selected model
       const session = await new_session_async(selectedModel);
-      console.log('Session created successfully');      // Process the image
+      console.log('Session created successfully');      // Process the image (alpha matting is now always enabled)
       const resultBytes = await remove(
         imageBytes,
-        true,  // alpha_matting - enable to test MODNet model
         240,   // alpha_matting_foreground_threshold
         10,    // alpha_matting_background_threshold
         10,    // alpha_matting_erode_size
