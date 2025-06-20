@@ -19,6 +19,7 @@ import { binary_erosion } from './libraries/scipy.ndimage';
 import { new_session } from './session_factory';
 import { sessions, sessions_names } from './libraries/sessions';
 import type { BaseSession } from './sessions/base';
+import { VideoFrameProcessor } from './libraries/video';
 
 ort.env.logLevel = 'error';  // Equivalent to ort.set_default_logger_severity(3)
 
@@ -218,6 +219,7 @@ async function download_models(models: string[]): Promise<void> {
 
 async function remove(
     data: Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[],
+    alpha_matting = true,
     alpha_matting_foreground_threshold = 240,
     alpha_matting_background_threshold = 10,
     alpha_matting_erode_size = 10,
@@ -226,15 +228,17 @@ async function remove(
     post_process_mask = false,
     force_return_bytes = false,
     ...args: unknown[]
-): Promise<Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[]> {    /**
-     * Remove the background from an input image or batch of images using alpha matting.
+): Promise<Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[]> {
+    /**
+     * Remove the background from an input image or batch of images.
      *
-     * This function processes images through segmentation and alpha matting for high-quality background removal.
-     * For batch processing, all images are first processed through the segmentation model, then through alpha matting.
+     * This function processes images through segmentation and optionally alpha matting for high-quality background removal.
+     * For batch processing, all images are first processed through the segmentation model, then through alpha matting if enabled.
      * This approach is more efficient than processing each image individually through both models.
      * 
      * Parameters:
      *     data (Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[]): The input image data or batch of images.
+     *     alpha_matting (boolean, optional): Whether to use alpha matting for better edge quality. Defaults to true.
      *     alpha_matting_foreground_threshold (number, optional): Foreground threshold for alpha matting. Defaults to 240.
      *     alpha_matting_background_threshold (number, optional): Background threshold for alpha matting. Defaults to 10.
      *     alpha_matting_erode_size (number, optional): Erosion size for alpha matting. Defaults to 10.
@@ -306,12 +310,12 @@ async function remove(
         for (let mask of masks) {
             if (post_process_mask) {
                 mask = Image.fromarray(post_process(np.array(mask)));
-            }
+            }            let cutout: PILImage;
 
-            let cutout: PILImage;            if (only_mask) {
+            if (only_mask) {
                 console.log(`Image ${i + 1}: Using only_mask mode`);
                 cutout = mask;
-            } else {
+            } else if (alpha_matting) {
                 console.log(`Image ${i + 1}: Using alpha_matting_cutout`);
                 try {
                     cutout = await alpha_matting_cutout(
@@ -326,6 +330,9 @@ async function remove(
                     console.log(`Image ${i + 1}: Alpha matting failed, falling back to putalpha_cutout`);
                     cutout = putalpha_cutout(img, mask);
                 }
+            } else {
+                console.log(`Image ${i + 1}: Using putalpha_cutout (no alpha matting)`);
+                cutout = putalpha_cutout(img, mask);
             }
 
             cutouts.push(cutout);
@@ -373,6 +380,90 @@ async function remove(
     }
 }
 
+async function remove_video(
+    data: File | Blob,
+    alpha_matting = true,
+    alpha_matting_foreground_threshold = 240,
+    alpha_matting_background_threshold = 10,
+    alpha_matting_erode_size = 10,
+    session?: BaseSession,
+    only_mask = false,
+    post_process_mask = false,
+    onProgress?: (current: number, total: number) => void,
+    ...args: unknown[]
+): Promise<string> {
+    /**
+     * Remove the background from a video file.
+     *
+     * This function processes each frame of a video through background removal,
+     * then reassembles them into a new video file.
+     * 
+     * Parameters:
+     *     data (File | Blob): The input video file.
+     *     alpha_matting (boolean, optional): Whether to use alpha matting for better edge quality. Defaults to true.
+     *     alpha_matting_foreground_threshold (number, optional): Foreground threshold for alpha matting. Defaults to 240.
+     *     alpha_matting_background_threshold (number, optional): Background threshold for alpha matting. Defaults to 10.
+     *     alpha_matting_erode_size (number, optional): Erosion size for alpha matting. Defaults to 10.
+     *     session (BaseSession?, optional): A session object for the model. Defaults to undefined.
+     *     only_mask (boolean, optional): Flag indicating whether to return only the binary masks. Defaults to false.
+     *     post_process_mask (boolean, optional): Flag indicating whether to post-process the masks. Defaults to false.
+     *     onProgress (function?, optional): Callback function to report progress. Receives (current, total) frame numbers.
+     *     ...args (unknown[]): Additional arguments.
+     *
+     * Returns:
+     *     string: A blob URL pointing to the processed video file.
+     */
+    console.log('remove_video: Starting video processing');
+    
+    // Initialize session if needed
+    if (session === undefined) {
+        session = new_session("u2net", ...args);
+        await session.initialize();
+    }
+
+    // Create video processor
+    const processor = new VideoFrameProcessor(data);
+    await processor.init();
+    console.log('remove_video: Video processor initialized');
+
+    let frameIndex = 0;
+    let frame: Uint8Array | null;
+
+    // Process each frame
+    while ((frame = await processor.next()) !== null) {
+        frameIndex++;
+        console.log(`remove_video: Processing frame ${frameIndex}`);
+          // Process frame through background removal
+        const processedFrame = await remove(
+            frame,
+            alpha_matting,
+            alpha_matting_foreground_threshold,
+            alpha_matting_background_threshold,
+            alpha_matting_erode_size,
+            session,
+            only_mask,
+            post_process_mask,
+            true // force_return_bytes
+        ) as Uint8Array;
+
+        // Add processed frame to video
+        await processor.push(processedFrame);
+        
+        // Report progress if callback provided
+        if (onProgress) {
+            onProgress(frameIndex, frameIndex); // We don't know total until we finish
+        }
+    }
+
+    console.log(`remove_video: Processed ${frameIndex} frames, exporting video`);
+    
+    // Export the final video
+    const videoUrl = await processor.exportFinalVideo();
+    console.log('remove_video: Video processing completed');
+    
+    return videoUrl;
+}
+
 export {
     ReturnType,
     alpha_matting_cutout,
@@ -382,6 +473,7 @@ export {
     post_process,
     download_models,
     remove,
+    remove_video,
 };
 
 // Also export session factory for convenience

@@ -4,6 +4,7 @@
   "description": "TypeScript port of rembg for web background removal - Demo App",
   "private": true,
   "dependencies": {
+    "@ffmpeg/core-wasm": "^0.7.1",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@techstark/opencv-js": "^4.11.0-release.1",

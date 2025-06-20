@@ -2,118 +2,154 @@ import React, { useState, useRef } from 'react';
 import './App.css';
 
 // Import our rembg-ts library
-import { remove, new_session_async } from './rembg-ts';
+import { remove, remove_video, new_session_async } from './rembg-ts';
 
 interface ProcessingStatus {
   loading: boolean;
   error: string | null;
   success: boolean;
+  progress?: { current: number; total: number };
 }
 
+type FileType = 'image' | 'video';
+
 function App() {
-  const [inputImage, setInputImage] = useState<string | null>(null);
-  const [outputImage, setOutputImage] = useState<string | null>(null);
+  const [inputFile, setInputFile] = useState<string | null>(null);
+  const [inputFileType, setInputFileType] = useState<FileType>('image');
+  const [outputFile, setOutputFile] = useState<string | null>(null);
   const [status, setStatus] = useState<ProcessingStatus>({
     loading: false,
     error: null,
     success: false
   });
   const [selectedModel, setSelectedModel] = useState<'u2net' | 'u2netp'>('u2net');
+  const [useAlphaMatting, setUseAlphaMatting] = useState<boolean>(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const [currentFile, setCurrentFile] = useState<File | null>(null);
   const loadExampleImage = async () => {
     try {
       setStatus({ loading: true, error: null, success: false });
-      setInputImage('/images/example.jpg');
-      setOutputImage(null);
+      setInputFile('/images/example.jpg');
+      setInputFileType('image');
+      setOutputFile(null);
+      setCurrentFile(null);
       setStatus({ loading: false, error: null, success: false });
     } catch (error) {
       setStatus({ loading: false, error: 'Failed to load example image', success: false });
     }
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>, fileType: FileType) => {
     const file = event.target.files?.[0];
     if (file) {
+      setCurrentFile(file);
+      setInputFileType(fileType);
+      
       const reader = new FileReader();
       reader.onload = (e) => {
-        setInputImage(e.target?.result as string);
-        setOutputImage(null);
+        setInputFile(e.target?.result as string);
+        setOutputFile(null);
         setStatus({ loading: false, error: null, success: false });
       };
       reader.readAsDataURL(file);
     }
   };
-
-  const processImage = async () => {
-    if (!inputImage) {
-      setStatus({ loading: false, error: 'Please select an image first', success: false });
+  const processFile = async () => {
+    if (!inputFile) {
+      setStatus({ loading: false, error: 'Please select a file first', success: false });
       return;
     }
 
     setStatus({ loading: true, error: null, success: false });
 
     try {
-      console.log('Starting background removal...');
+      console.log(`Starting ${inputFileType} processing...`);
       
-      // Convert data URL to blob
-      const response = await fetch(inputImage);
-      const blob = await response.blob();
-      const arrayBuffer = await blob.arrayBuffer();
-      const imageBytes = new Uint8Array(arrayBuffer);
-
-      console.log(`Processing with model: ${selectedModel}`);
-      console.log('Image size:', imageBytes.length, 'bytes');
-
       // Create session for the selected model
       const session = await new_session_async(selectedModel);
-      console.log('Session created successfully');      // Process the image (alpha matting is now always enabled)
-      const resultBytes = await remove(
-        imageBytes,
-        240,   // alpha_matting_foreground_threshold
-        10,    // alpha_matting_background_threshold
-        10,    // alpha_matting_erode_size
-        session // Use our session
-      ) as Uint8Array;
+      console.log('Session created successfully');
 
-      console.log('Background removal completed, result size:', resultBytes.length, 'bytes');
+      if (inputFileType === 'image') {
+        // Process image
+        const response = await fetch(inputFile);
+        const blob = await response.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        const imageBytes = new Uint8Array(arrayBuffer);
 
-      // Create blob URL for the result
-      const resultBlob = new Blob([resultBytes], { type: 'image/png' });
-      const resultUrl = URL.createObjectURL(resultBlob);
+        console.log(`Processing image with model: ${selectedModel}`);
+        console.log('Image size:', imageBytes.length, 'bytes');        const resultBytes = await remove(
+          imageBytes,
+          useAlphaMatting, // alpha_matting
+          240,   // alpha_matting_foreground_threshold
+          10,    // alpha_matting_background_threshold
+          10,    // alpha_matting_erode_size
+          session // Use our session
+        ) as Uint8Array;
+
+        console.log('Background removal completed, result size:', resultBytes.length, 'bytes');
+
+        // Create blob URL for the result
+        const resultBlob = new Blob([resultBytes], { type: 'image/png' });
+        const resultUrl = URL.createObjectURL(resultBlob);
+        
+        setOutputFile(resultUrl);
+      } else {
+        // Process video
+        if (!currentFile) {
+          throw new Error('No video file selected');
+        }
+
+        console.log(`Processing video with model: ${selectedModel}`);
+        console.log('Video file:', currentFile.name, currentFile.size, 'bytes');        const resultUrl = await remove_video(
+          currentFile,
+          useAlphaMatting, // alpha_matting
+          240,   // alpha_matting_foreground_threshold
+          10,    // alpha_matting_background_threshold
+          10,    // alpha_matting_erode_size
+          session, // Use our session
+          false, // only_mask
+          false, // post_process_mask
+          (current: number, total: number) => {
+            setStatus(prev => ({ 
+              ...prev, 
+              progress: { current, total } 
+            }));
+          }
+        );
+
+        console.log('Video background removal completed');
+        setOutputFile(resultUrl);
+      }
       
-      setOutputImage(resultUrl);
       setStatus({ loading: false, error: null, success: true });
 
     } catch (error) {
-      console.error('Error processing image:', error);
+      console.error(`Error processing ${inputFileType}:`, error);
       setStatus({ 
         loading: false, 
-        error: error instanceof Error ? error.message : 'Failed to process image', 
+        error: error instanceof Error ? error.message : `Failed to process ${inputFileType}`, 
         success: false 
       });
     }
   };
-
   const downloadResult = () => {
-    if (outputImage) {
+    if (outputFile) {
       const link = document.createElement('a');
-      link.href = outputImage;
-      link.download = 'background-removed.png';
+      link.href = outputFile;
+      link.download = inputFileType === 'image' ? 'background-removed.png' : 'background-removed.mp4';
       link.click();
     }
   };
 
   return (
-    <div className="App">
-      <header className="App-header">
+    <div className="App">      <header className="App-header">
         <h1>🎭 rembg-ts Demo</h1>
-        <p>TypeScript Background Removal in the Browser</p>
+        <p>TypeScript Background Removal for Images & Videos in the Browser</p>
       </header>
 
-      <main className="App-main">
-        <div className="controls-section">
-          <h2>Step 1: Load an Image</h2>
+      <main className="App-main">        <div className="controls-section">
+          <h2>Step 1: Load a File</h2>
           <div className="button-group">
             <button 
               onClick={loadExampleImage}
@@ -127,18 +163,30 @@ function App() {
               className="btn btn-secondary"
               disabled={status.loading}
             >
-              Choose Your Own Image
+              Choose Image
+            </button>
+            <button 
+              onClick={() => videoInputRef.current?.click()}
+              className="btn btn-secondary"
+              disabled={status.loading}
+            >
+              Choose Video
             </button>
             <input
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              onChange={handleFileSelect}
+              onChange={(e) => handleFileSelect(e, 'image')}
               style={{ display: 'none' }}
             />
-          </div>
-
-          <h2>Step 2: Select Model</h2>
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept="video/*"
+              onChange={(e) => handleFileSelect(e, 'video')}
+              style={{ display: 'none' }}
+            />
+          </div>          <h2>Step 2: Select Model</h2>
           <div className="model-selector">
             <label>
               <input
@@ -162,21 +210,36 @@ function App() {
             </label>
           </div>
 
-          <h2>Step 3: Process</h2>
+          <h2>Step 3: Processing Options</h2>
+          <div className="processing-options">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={useAlphaMatting}
+                onChange={(e) => setUseAlphaMatting(e.target.checked)}
+                disabled={status.loading}
+              />
+              Use Alpha Matting (Better edge quality, slower processing)
+            </label>
+          </div>
+
+          <h2>Step 4: Process</h2>
           <button 
-            onClick={processImage}
+            onClick={processFile}
             className="btn btn-primary"
-            disabled={!inputImage || status.loading}
+            disabled={!inputFile || status.loading}
           >
-            {status.loading ? 'Processing...' : 'Remove Background'}
+            {status.loading ? `Processing ${inputFileType}...` : `Remove Background from ${inputFileType}`}
           </button>
         </div>
 
-        <div className="status-section">
-          {status.loading && (
+        <div className="status-section">          {status.loading && (
             <div className="status loading">
               <div className="spinner"></div>
-              Processing image with {selectedModel}...
+              Processing {inputFileType} with {selectedModel}{useAlphaMatting ? ' + Alpha Matting' : ''}...
+              {status.progress && inputFileType === 'video' && (
+                <div>Frame {status.progress.current} processed</div>
+              )}
             </div>
           )}
           
@@ -188,49 +251,57 @@ function App() {
           
           {status.success && (
             <div className="status success">
-              ✅ Background removed successfully!
+              ✅ Background removed from {inputFileType} successfully!
             </div>
           )}
         </div>
 
         <div className="images-section">
           <div className="image-container">
-            <h3>Original Image</h3>
-            {inputImage ? (
-              <img src={inputImage} alt="Original" className="preview-image" />
+            <h3>Original {inputFileType === 'image' ? 'Image' : 'Video'}</h3>
+            {inputFile ? (
+              inputFileType === 'image' ? (
+                <img src={inputFile} alt="Original" className="preview-image" />
+              ) : (
+                <video src={inputFile} controls className="preview-video" />
+              )
             ) : (
-              <div className="placeholder">No image selected</div>
+              <div className="placeholder">No {inputFileType} selected</div>
             )}
           </div>
 
           <div className="image-container">
             <h3>Result</h3>
-            {outputImage ? (
+            {outputFile ? (
               <div>
-                <img src={outputImage} alt="Background removed" className="preview-image" />
+                {inputFileType === 'image' ? (
+                  <img src={outputFile} alt="Background removed" className="preview-image" />
+                ) : (
+                  <video src={outputFile} controls className="preview-video" />
+                )}
                 <button onClick={downloadResult} className="btn btn-success">
                   Download Result
                 </button>
               </div>
             ) : (
-              <div className="placeholder">Processed image will appear here</div>
+              <div className="placeholder">Processed {inputFileType} will appear here</div>
             )}
           </div>
-        </div>
-
-        <div className="info-section">
+        </div>        <div className="info-section">
           <h2>About This Demo</h2>
           <p>
             This demo showcases the rembg-ts library, a TypeScript port of the popular Python rembg library.
-            It performs background removal entirely in the browser using ONNX Runtime Web.
+            It performs background removal entirely in the browser using ONNX Runtime Web and supports both images and videos.
           </p>
           <ul>
             <li><strong>U2Net:</strong> Higher quality results, larger model size</li>
             <li><strong>U2NetP:</strong> Faster processing, smaller model size</li>
+            <li><strong>Images:</strong> PNG, JPEG, WebP, and other common formats</li>
+            <li><strong>Videos:</strong> MP4 and other common video formats (processed frame by frame)</li>
           </ul>
           <p>
             <strong>Note:</strong> The first time you use a model, it will be downloaded and cached by your browser.
-            This may take a moment depending on your internet connection.
+            Video processing may take longer as each frame is processed individually. FFmpeg.wasm is used for video handling.
           </p>
         </div>
       </main>

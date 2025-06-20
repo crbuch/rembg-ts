@@ -8,6 +8,7 @@
 // Main background removal functionality
 export {
     remove,
+    remove_video,
     new_session,
     new_session_async,
     ReturnType,
@@ -46,6 +47,9 @@ export * as io from './libraries/io';
 
 // OpenCV-like operations  
 export * as cv2 from './libraries/cv2';
+
+// Video processing
+export { VideoFrameProcessor } from './libraries/video';
 
 // Default export for convenience
 export { remove as default } from './bg';
