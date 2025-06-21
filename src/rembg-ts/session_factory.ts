@@ -4,7 +4,11 @@ import * as ort from 'onnxruntime-web';
 import { sessions_class } from './libraries/sessions';
 import { BaseSession } from './sessions/base';
 
-export function new_session(model_name = "u2net", ...args: unknown[]): BaseSession {
+export function new_session(
+    model_name = "u2net", 
+    downloadProgressCallback?: (loaded: number, total: number) => void,
+    ...args: unknown[]
+): BaseSession {
     /**
      * Create a new session object based on the specified model name.
      *
@@ -44,14 +48,18 @@ export function new_session(model_name = "u2net", ...args: unknown[]): BaseSessi
         sess_opts.intraOpNumThreads = threads;
     }
 
-    return new session_class(model_name, sess_opts, ...args);
+    return new session_class(model_name, sess_opts, downloadProgressCallback, ...args);
 }
 
 /**
  * Create and initialize a session asynchronously
  */
-export async function new_session_async(model_name = "u2net", ...args: unknown[]): Promise<BaseSession> {
-    const session = new_session(model_name, ...args);
+export async function new_session_async(
+    model_name = "u2net", 
+    downloadProgressCallback?: (loaded: number, total: number) => void,
+    ...args: unknown[]
+): Promise<BaseSession> {
+    const session = new_session(model_name, downloadProgressCallback, ...args);
     await session.initialize();
     return session;
 }

@@ -9,6 +9,7 @@ interface ProcessingStatus {
   error: string | null;
   success: boolean;
   progress?: { current: number; total: number };
+  downloadProgress?: { loaded: number; total: number };
 }
 
 type FileType = 'image' | 'video';
@@ -59,12 +60,15 @@ function App() {
       return;
     }
 
-    setStatus({ loading: true, error: null, success: false });
-
-    try {
+    setStatus({ loading: true, error: null, success: false });    try {
       console.log(`Starting ${inputFileType} processing...`);
-        // Create session for the u2net model
-      const session = await new_session_async('u2net');
+        // Create session for the u2net model with download progress callback
+      const session = await new_session_async('u2net', (loaded: number, total: number) => {
+        setStatus(prev => ({ 
+          ...prev, 
+          downloadProgress: { loaded, total } 
+        }));
+      });
       console.log('Session created successfully');
 
       if (inputFileType === 'image') {
@@ -205,14 +209,32 @@ function App() {
           >
             {status.loading ? `Processing ${inputFileType}...` : `Remove Background from ${inputFileType}`}
           </button>
-        </div>
-
-        <div className="status-section">          {status.loading && (
+        </div>        <div className="status-section">          {status.loading && (
             <div className="status loading">
               <div className="spinner"></div>
-              Processing {inputFileType} with U2Net{useAlphaMatting ? ' + Alpha Matting' : ''}...
-              {status.progress && inputFileType === 'video' && (
-                <div>Frame {status.progress.current} processed</div>
+              {status.downloadProgress ? (
+                <div>
+                  <div>Downloading U2Net model...</div>
+                  <div className="progress-bar">
+                    <div 
+                      className="progress-fill" 
+                      style={{ 
+                        width: `${Math.round((status.downloadProgress.loaded / status.downloadProgress.total) * 100)}%` 
+                      }}
+                    ></div>
+                  </div>
+                  <div className="progress-text">
+                    {Math.round((status.downloadProgress.loaded / status.downloadProgress.total) * 100)}% 
+                    ({(status.downloadProgress.loaded / 1024 / 1024).toFixed(1)}MB / {(status.downloadProgress.total / 1024 / 1024).toFixed(1)}MB)
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  Processing {inputFileType} with U2Net{useAlphaMatting ? ' + Alpha Matting' : ''}...
+                  {status.progress && inputFileType === 'video' && (
+                    <div>Frame {status.progress.current} processed</div>
+                  )}
+                </div>
               )}
             </div>
           )}

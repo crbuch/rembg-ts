@@ -286,10 +286,9 @@ async function remove(
         }        
         // Images are now ready for processing
         images.push(img);
-        returnTypes.push(return_type);
-    }    // Initialize session if needed
+        returnTypes.push(return_type);    }    // Initialize session if needed
     if (session === undefined) {
-        session = new_session("u2net", ...args);
+        session = new_session("u2net", undefined, ...args);
         await session.initialize();
     }    // TRUE PIPELINE APPROACH:
     // Phase 1: Preprocess ALL images first
@@ -562,10 +561,9 @@ async function remove_video(
      *     string: A blob URL pointing to the processed video file.
      */
     console.log('remove_video: Starting video processing');
-    
-    // Initialize session if needed
+      // Initialize session if needed
     if (session === undefined) {
-        session = new_session("u2net", ...args);
+        session = new_session("u2net", undefined, ...args);
         await session.initialize();
     }    // Create video processor
     const processor = new VideoFrameProcessor(data);

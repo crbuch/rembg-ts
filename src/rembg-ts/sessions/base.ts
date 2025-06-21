@@ -14,17 +14,19 @@ export class BaseSession {
   protected inner_session: ort.InferenceSession | null = null;
   protected sess_opts: ort.InferenceSession.SessionOptions;
   protected initialized: boolean = false;
+  protected downloadProgressCallback?: (loaded: number, total: number) => void;
 
   constructor(
     model_name: string,
     sess_opts: ort.InferenceSession.SessionOptions,
+    downloadProgressCallback?: (loaded: number, total: number) => void,
     ...args: unknown[]
-  ) {
-    /**
+  ) {    /**
      * Initialize an instance of the BaseSession class.
      */
     this.model_name = model_name;
     this.sess_opts = sess_opts;
+    this.downloadProgressCallback = downloadProgressCallback;
 
     // Determine execution providers based on device capabilities
     const providers: string[] = [];
@@ -54,15 +56,50 @@ export class BaseSession {
     }
 
     try {
-      const modelPath = this.getModelPath();
-
-      // Download/fetch the model
+      const modelPath = this.getModelPath();      // Download/fetch the model with progress tracking
       console.log(`Loading model: ${modelPath}`);
       const response = await fetch(modelPath);
       if (!response.ok) {
         throw new Error(`Failed to fetch model: ${response.statusText}`);
       }
-      let modelArrayBuffer = await response.arrayBuffer();
+
+      // Get the total size from Content-Length header
+      const contentLength = response.headers.get('Content-Length');
+      const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
+
+      if (!response.body) {
+        throw new Error('Response body is null');
+      }
+
+      // Read the response with progress tracking
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let loadedSize = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) break;
+        
+        chunks.push(value);
+        loadedSize += value.length;
+
+        // Report progress if callback is provided
+        if (this.downloadProgressCallback && totalSize > 0) {
+          this.downloadProgressCallback(loadedSize, totalSize);
+        }
+      }
+
+      // Combine all chunks into a single ArrayBuffer
+      const totalBytes = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+      const combinedArray = new Uint8Array(totalBytes);
+      let offset = 0;
+      for (const chunk of chunks) {
+        combinedArray.set(chunk, offset);
+        offset += chunk.length;
+      }
+      
+      let modelArrayBuffer = combinedArray.buffer;
 
       // Apply WebGPU MaxPool fix if using WebGPU execution provider
       const executionProviders = this.sess_opts.executionProviders || [];
