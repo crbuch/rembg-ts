@@ -42,6 +42,10 @@ export { sessions, sessions_names } from './libraries/sessions';
 export * as np from './libraries/numpy';
 export type { NumpyArray } from './libraries/numpy';
 
+// Memory-optimized tensor operations (for advanced users)
+export * as npOptimized from './libraries/numpy_optimized';
+export type { TensorNumpyArray } from './libraries/numpy_optimized';
+
 // I/O operations
 export * as io from './libraries/io';
 

@@ -4,12 +4,12 @@ A TypeScript/JavaScript port of the popular Python rembg library for background 
 
 ## Overview
 
-This library provides the same functionality as the Python rembg library but designed to run in web browsers using ONNX Runtime Web. It supports both u2net and u2netp models for background removal.
+This library provides the same functionality as the Python rembg library but designed to run in web browsers using ONNX Runtime Web. It uses the u2net model for background removal.
 
 ## Features
 
 - **Web-native**: Runs entirely in the browser using ONNX Runtime Web
-- **Multiple models**: Support for u2net and u2netp models
+- **High-quality model**: Uses the u2net model for background removal
 - **Flexible input/output**: Supports Uint8Array, PIL-like images, and numpy-like arrays
 - **Alpha matting**: Advanced edge refinement for high-quality cutouts
 - **Async operations**: Non-blocking operations that won't freeze the UI
@@ -21,9 +21,8 @@ This library provides the same functionality as the Python rembg library but des
 npm install rembg-ts
 ```
 
-Note: Make sure to place your ONNX model files in the `public/models/` directory of your web application:
+Note: Make sure to place your ONNX model file in the `public/models/` directory of your web application:
 - `public/models/u2net.onnx`
-- `public/models/u2netp.onnx`
 
 ## Quick Start
 
@@ -76,7 +75,7 @@ The main function for background removal.
 Create a new session for a specific model.
 
 **Parameters:**
-- `modelName: string` - Model name ("u2net" or "u2netp")
+- `modelName: string` - Model name ("u2net")
 
 **Returns:** `BaseSession`
 
@@ -85,7 +84,7 @@ Create a new session for a specific model.
 Create and initialize a session asynchronously.
 
 **Parameters:**
-- `modelName: string` - Model name ("u2net" or "u2netp")
+- `modelName: string` - Model name ("u2net")
 
 **Returns:** `Promise<BaseSession>`
 
@@ -130,13 +129,9 @@ const result = arr.multiply(2).add(ones);
 ```typescript
 import { remove, new_session_async } from 'rembg-ts';
 
-// Use u2netp (lighter, faster)
-const session = await new_session_async('u2netp');
+// Use u2net model
+const session = await new_session_async('u2net');
 const result = await remove(imageData, false, 240, 10, 10, session);
-
-// Use u2net (higher quality)
-const sessionHQ = await new_session_async('u2net');
-const resultHQ = await remove(imageData, false, 240, 10, 10, sessionHQ);
 ```
 
 ### Alpha Matting for Better Edges
@@ -182,8 +177,6 @@ for (const imageData of imageList) {
 ## Supported Models
 
 - **u2net**: General purpose, high quality background removal
-- **u2netp**: Lightweight version of u2net, faster processing
-
 ## Requirements
 
 - Modern web browser with WebAssembly support
@@ -200,9 +193,8 @@ for (const imageData of imageList) {
 ## Performance Tips
 
 1. **Reuse sessions**: Create sessions once and reuse them for multiple images
-2. **Choose appropriate models**: Use u2netp for speed, u2net for quality
-3. **Preload models**: Call `new_session_async()` early to preload models
-4. **Image sizing**: Resize large images before processing for better performance
+2. **Preload models**: Call `new_session_async()` early to preload models
+3. **Image sizing**: Resize large images before processing for better performance
 
 ## License
 

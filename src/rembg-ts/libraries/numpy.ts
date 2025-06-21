@@ -519,6 +519,62 @@ export function squeeze(array: NumpyArray, axis?: number): NumpyArray {
     return new WebNumpyArray(array.data, newShape, array.dtype);
 }
 
+export function stack(arrays: NumpyArray[], axis: number = 0): NumpyArray {
+    /**
+     * Stack arrays along a new axis
+     */
+    if (arrays.length === 0) {
+        throw new Error("Cannot stack empty array list");
+    }
+    
+    // Verify all arrays have the same shape
+    const refShape = arrays[0].shape;
+    for (let i = 1; i < arrays.length; i++) {
+        if (arrays[i].shape.length !== refShape.length || 
+            !arrays[i].shape.every((dim, idx) => dim === refShape[idx])) {
+            throw new Error("All arrays must have the same shape for stacking");
+        }
+    }
+    
+    // Calculate new shape
+    const newShape = [...refShape];
+    newShape.splice(axis, 0, arrays.length);
+    
+    // Calculate total size
+    const totalSize = newShape.reduce((a, b) => a * b, 1);
+    
+    // Create output array with same dtype as input
+    const outputData = arrays[0].dtype === 'uint8' ? 
+        new Uint8Array(totalSize) : 
+        arrays[0].dtype === 'int32' ?
+        new Int32Array(totalSize) :
+        new Float32Array(totalSize);
+    
+    // Calculate stride for copying
+    const elementSize = refShape.reduce((a, b) => a * b, 1);
+    
+    // Copy data from each array
+    for (let i = 0; i < arrays.length; i++) {
+        const srcData = arrays[i].data;
+        const destOffset = i * elementSize;
+        
+        if (outputData instanceof Uint8Array && srcData instanceof Uint8Array) {
+            outputData.set(srcData, destOffset);
+        } else if (outputData instanceof Int32Array && srcData instanceof Int32Array) {
+            outputData.set(srcData, destOffset);
+        } else if (outputData instanceof Float32Array && srcData instanceof Float32Array) {
+            outputData.set(srcData, destOffset);
+        } else {
+            // Type conversion needed
+            for (let j = 0; j < srcData.length; j++) {
+                outputData[destOffset + j] = srcData[j];
+            }
+        }
+    }
+    
+    return new WebNumpyArray(outputData, newShape, arrays[0].dtype);
+}
+
 // Export the main numpy-like object
 const numpy = {
     asarray,
@@ -534,7 +590,8 @@ const numpy = {
     squeeze,
     uint8,
     float32,
-    int32
+    int32,
+    stack
 };
 
 export default numpy;

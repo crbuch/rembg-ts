@@ -21,9 +21,7 @@ function App() {
     loading: false,
     error: null,
     success: false
-  });
-  const [selectedModel, setSelectedModel] = useState<'u2net' | 'u2netp'>('u2net');
-  const [useAlphaMatting, setUseAlphaMatting] = useState<boolean>(true);
+  });  const [useAlphaMatting, setUseAlphaMatting] = useState<boolean>(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
@@ -65,9 +63,8 @@ function App() {
 
     try {
       console.log(`Starting ${inputFileType} processing...`);
-      
-      // Create session for the selected model
-      const session = await new_session_async(selectedModel);
+        // Create session for the u2net model
+      const session = await new_session_async('u2net');
       console.log('Session created successfully');
 
       if (inputFileType === 'image') {
@@ -77,7 +74,7 @@ function App() {
         const arrayBuffer = await blob.arrayBuffer();
         const imageBytes = new Uint8Array(arrayBuffer);
 
-        console.log(`Processing image with model: ${selectedModel}`);
+        console.log('Processing image with U2Net model');
         console.log('Image size:', imageBytes.length, 'bytes');        const resultBytes = await remove(
           imageBytes,
           useAlphaMatting, // alpha_matting
@@ -100,7 +97,7 @@ function App() {
           throw new Error('No video file selected');
         }
 
-        console.log(`Processing video with model: ${selectedModel}`);
+        console.log('Processing video with U2Net model');
         console.log('Video file:', currentFile.name, currentFile.size, 'bytes');        const resultUrl = await remove_video(
           currentFile,
           useAlphaMatting, // alpha_matting
@@ -185,32 +182,9 @@ function App() {
               accept="video/*"
               onChange={(e) => handleFileSelect(e, 'video')}
               style={{ display: 'none' }}
-            />
-          </div>          <h2>Step 2: Select Model</h2>
-          <div className="model-selector">
-            <label>
-              <input
-                type="radio"
-                value="u2net"
-                checked={selectedModel === 'u2net'}
-                onChange={(e) => setSelectedModel(e.target.value as 'u2net')}
-                disabled={status.loading}
-              />
-              U2Net (Higher Quality, Slower)
-            </label>
-            <label>
-              <input
-                type="radio"
-                value="u2netp"
-                checked={selectedModel === 'u2netp'}
-                onChange={(e) => setSelectedModel(e.target.value as 'u2netp')}
-                disabled={status.loading}
-              />
-              U2NetP (Faster, Lighter)
-            </label>
-          </div>
+            />          </div>
 
-          <h2>Step 3: Processing Options</h2>
+          <h2>Step 2: Processing Options</h2>
           <div className="processing-options">
             <label className="checkbox-label">
               <input
@@ -223,7 +197,7 @@ function App() {
             </label>
           </div>
 
-          <h2>Step 4: Process</h2>
+          <h2>Step 3: Process</h2>
           <button 
             onClick={processFile}
             className="btn btn-primary"
@@ -236,7 +210,7 @@ function App() {
         <div className="status-section">          {status.loading && (
             <div className="status loading">
               <div className="spinner"></div>
-              Processing {inputFileType} with {selectedModel}{useAlphaMatting ? ' + Alpha Matting' : ''}...
+              Processing {inputFileType} with U2Net{useAlphaMatting ? ' + Alpha Matting' : ''}...
               {status.progress && inputFileType === 'video' && (
                 <div>Frame {status.progress.current} processed</div>
               )}
@@ -288,14 +262,12 @@ function App() {
             )}
           </div>
         </div>        <div className="info-section">
-          <h2>About This Demo</h2>
-          <p>
+          <h2>About This Demo</h2>          <p>
             This demo showcases the rembg-ts library, a TypeScript port of the popular Python rembg library.
-            It performs background removal entirely in the browser using ONNX Runtime Web and supports both images and videos.
+            It performs background removal entirely in the browser using ONNX Runtime Web and supports both images and videos using the U2Net model.
           </p>
           <ul>
-            <li><strong>U2Net:</strong> Higher quality results, larger model size</li>
-            <li><strong>U2NetP:</strong> Faster processing, smaller model size</li>
+            <li><strong>U2Net:</strong> High quality background removal model</li>
             <li><strong>Images:</strong> PNG, JPEG, WebP, and other common formats</li>
             <li><strong>Videos:</strong> MP4 and other common video formats (processed frame by frame)</li>
           </ul>

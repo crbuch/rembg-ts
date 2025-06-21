@@ -228,13 +228,19 @@ async function remove(
     post_process_mask = false,
     force_return_bytes = false,
     ...args: unknown[]
-): Promise<Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[]> {
-    /**
-     * Remove the background from an input image or batch of images.
-     *
-     * This function processes images through segmentation and optionally alpha matting for high-quality background removal.
-     * For batch processing, all images are first processed through the segmentation model, then through alpha matting if enabled.
-     * This approach is more efficient than processing each image individually through both models.
+): Promise<Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[]> {    /**
+     * Remove the background from an input image or batch of images using a true pipeline approach.
+     *     * This function implements a 4-phase pipeline for optimal performance:
+     * Phase 1: Preprocess ALL images first
+     * Phase 2: Run ALL images through U2Net segmentation model using efficient batch processing
+     * Phase 3: Run ALL segmentation outputs through alpha matting pipeline (if enabled):
+     *   - Alpha Phase 1: Preprocess ALL image-mask pairs (trimap generation, etc.)
+     *   - Alpha Phase 2: Run ALL pairs through alpha estimation
+     *   - Alpha Phase 3: Process ALL alpha results into final cutouts
+     * Phase 4: Convert results to requested output format
+     * 
+     * The U2Net session handles the internal pipeline for segmentation (preprocess → inference → collect),
+     * and this function handles the overall pipeline including the alpha matting sub-pipeline and output formatting.
      * 
      * Parameters:
      *     data (Uint8Array | PILImage | NumpyArray | (Uint8Array | PILImage | NumpyArray)[]): The input image data or batch of images.
@@ -281,67 +287,204 @@ async function remove(
         // Images are now ready for processing
         images.push(img);
         returnTypes.push(return_type);
-    }
-
-    // Initialize session if needed
+    }    // Initialize session if needed
     if (session === undefined) {
         session = new_session("u2net", ...args);
         await session.initialize();
-    }
-
-    // BATCH PROCESSING: First pass - get all masks from segmentation model
-    console.log(`Processing batch of ${images.length} images through segmentation model...`);
-    const allMasks: PILImage[][] = [];
+    }    // TRUE PIPELINE APPROACH:
+    // Phase 1: Preprocess ALL images first
+    console.log(`Phase 1: Preprocessing ${images.length} images...`);
+    // Images are already preprocessed when converted to PILImage format above
+    console.log('Phase 1 complete: All images preprocessed');    // Phase 2: Run ALL images through U2Net sequentially, collecting ALL segmentation outputs
+    console.log(`Phase 2: Running ALL ${images.length} images through U2Net using efficient batch processing...`);
     
-    for (const img of images) {
-        const masks = await session.predict(img, ...args);
-        allMasks.push(masks);
-    }
-    console.log('Segmentation completed for all images');
-
-    // BATCH PROCESSING: Second pass - process cutouts (including alpha matting if enabled)
+    // Use predict_batch for efficient pipeline processing
+    const allMasks = await session.predict_batch(images, ...args);
+    
+    console.log('Phase 2 complete: ALL images processed through U2Net model');    // Phase 3: Run ALL outputs through post-processing and alpha matting (if enabled)
+    console.log(`Phase 3: Processing ${images.length} cutouts with alpha matting...`);
     const allCutouts: PILImage[][] = [];
     
-    for (let i = 0; i < images.length; i++) {
-        const img = images[i];
-        const masks = allMasks[i];
-        const cutouts: PILImage[] = [];
-
-        for (let mask of masks) {
-            if (post_process_mask) {
-                mask = Image.fromarray(post_process(np.array(mask)));
-            }            let cutout: PILImage;
-
-            if (only_mask) {
-                console.log(`Image ${i + 1}: Using only_mask mode`);
-                cutout = mask;
-            } else if (alpha_matting) {
-                console.log(`Image ${i + 1}: Using alpha_matting_cutout`);
-                try {
-                    cutout = await alpha_matting_cutout(
-                        img,
-                        mask,
-                        alpha_matting_foreground_threshold,
-                        alpha_matting_background_threshold,
-                        alpha_matting_erode_size,
-                    );
-                } catch (error) {
-                    console.error(`Image ${i + 1}: Alpha matting failed with error:`, error);
-                    console.log(`Image ${i + 1}: Alpha matting failed, falling back to putalpha_cutout`);
-                    cutout = putalpha_cutout(img, mask);
+    if (alpha_matting) {
+        // Prepare ALL image-mask pairs for alpha matting
+        const allImageMaskPairs: { image: PILImage; mask: PILImage; imageIdx: number; maskIdx: number }[] = [];
+        
+        for (let i = 0; i < images.length; i++) {
+            const masks = allMasks[i];
+            for (let j = 0; j < masks.length; j++) {
+                let mask = masks[j];
+                if (post_process_mask) {
+                    mask = Image.fromarray(post_process(np.array(mask)));
                 }
-            } else {
-                console.log(`Image ${i + 1}: Using putalpha_cutout (no alpha matting)`);
-                cutout = putalpha_cutout(img, mask);
+                
+                allImageMaskPairs.push({
+                    image: images[i],
+                    mask: mask,
+                    imageIdx: i,
+                    maskIdx: j
+                });
             }
-
-            cutouts.push(cutout);
         }
         
-        allCutouts.push(cutouts);
-    }
+        console.log(`Phase 3: Running ALL ${allImageMaskPairs.length} image-mask pairs through alpha matting pipeline...`);
+        
+        // Alpha Matting Pipeline - Phase 1: Preprocess ALL image-mask pairs
+        console.log('Alpha matting Phase 1: Preprocessing ALL image-mask pairs...');
+        const preprocessedPairs: {
+            img_normalized: NumpyArray;
+            trimap_normalized: NumpyArray;
+            imageIdx: number;
+            maskIdx: number;
+        }[] = [];
+        
+        for (let i = 0; i < allImageMaskPairs.length; i++) {
+            const pair = allImageMaskPairs[i];
+            let img = pair.image;
+            
+            if (img.mode === "RGBA" || img.mode === "CMYK") {
+                img = img.convert("RGB");
+            }
+            
+            const img_array = np.asarray(img);
+            const mask_array = np.asarray(pair.mask);
+            
+            // Ensure we have RGB (3-channel) image
+            let img_array_rgb = img_array;
+            if (img_array.shape.length === 3 && img_array.shape[2] === 4) {
+                // Convert RGBA to RGB by dropping alpha channel
+                const [height, width] = img_array.shape;
+                const rgbData = new Float32Array(height * width * 3);
+                
+                for (let j = 0; j < height * width; j++) {
+                    rgbData[j * 3] = img_array.data[j * 4];     // R
+                    rgbData[j * 3 + 1] = img_array.data[j * 4 + 1]; // G
+                    rgbData[j * 3 + 2] = img_array.data[j * 4 + 2]; // B
+                }
+                
+                img_array_rgb = new (img_array.constructor as any)(rgbData, [height, width, 3], img_array.dtype);
+            }
 
-    // Process final results
+            const is_foreground = mask_array.gt(alpha_matting_foreground_threshold);
+            const is_background = mask_array.lt(alpha_matting_background_threshold);
+
+            let structure: unknown = null;
+            if (alpha_matting_erode_size > 0) {
+                structure = np.ones(
+                    [alpha_matting_erode_size, alpha_matting_erode_size],
+                    { dtype: np.uint8 }
+                );
+            }
+
+            const is_foreground_eroded = binary_erosion(is_foreground, { structure: structure });
+            const is_background_eroded = binary_erosion(is_background, { structure: structure, border_value: 1 });
+
+            const trimap = np.full(mask_array.shape, { dtype: np.uint8, fill_value: 128 });
+            trimap.setValues(is_foreground_eroded, 255);
+            trimap.setValues(is_background_eroded, 0);
+
+            const img_normalized = img_array_rgb.divide(255.0);
+            const trimap_normalized = trimap.divide(255.0);
+            
+            preprocessedPairs.push({
+                img_normalized,
+                trimap_normalized,
+                imageIdx: pair.imageIdx,
+                maskIdx: pair.maskIdx
+            });
+        }
+        
+        console.log('Alpha matting Phase 1 complete: ALL image-mask pairs preprocessed');
+        
+        // Alpha Matting Pipeline - Phase 2: Run ALL pairs through alpha estimation
+        console.log('Alpha matting Phase 2: Running ALL pairs through alpha estimation...');
+        const alphaResults: {
+            alpha: NumpyArray;
+            img_normalized: NumpyArray;
+            imageIdx: number;
+            maskIdx: number;
+        }[] = [];
+        
+        for (let i = 0; i < preprocessedPairs.length; i++) {
+            const pair = preprocessedPairs[i];
+            console.log(`Alpha estimation: Processing pair ${i + 1}/${preprocessedPairs.length}`);
+            
+            const alpha = await estimate_alpha_cf(pair.img_normalized, pair.trimap_normalized);
+            
+            alphaResults.push({
+                alpha,
+                img_normalized: pair.img_normalized,
+                imageIdx: pair.imageIdx,
+                maskIdx: pair.maskIdx
+            });
+        }
+        
+        console.log('Alpha matting Phase 2 complete: ALL alpha estimations done');
+        
+        // Alpha Matting Pipeline - Phase 3: Process ALL alpha results into final cutouts
+        console.log('Alpha matting Phase 3: Processing ALL alpha results into final cutouts...');
+        const finalCutouts: {
+            cutout: PILImage;
+            imageIdx: number;
+            maskIdx: number;
+        }[] = [];
+        
+        for (let i = 0; i < alphaResults.length; i++) {
+            const result = alphaResults[i];
+            console.log(`Final cutout processing: Processing result ${i + 1}/${alphaResults.length}`);
+            
+            const foreground = estimate_foreground_ml(result.img_normalized, result.alpha) as NumpyArray;
+            let cutout = stack_images(foreground, result.alpha);
+            cutout = np.clip(cutout.multiply(255), 0, 255).astype(np.uint8);
+            const cutoutImage = Image.fromarray(cutout);
+            
+            finalCutouts.push({
+                cutout: cutoutImage,
+                imageIdx: result.imageIdx,
+                maskIdx: result.maskIdx
+            });
+        }
+        
+        console.log('Alpha matting Phase 3 complete: ALL final cutouts processed');
+        
+        // Reorganize results back to per-image structure
+        for (let i = 0; i < images.length; i++) {
+            allCutouts.push([]);
+        }
+        
+        for (const result of finalCutouts) {
+            allCutouts[result.imageIdx].push(result.cutout);
+        }
+        
+        console.log('Phase 3 complete: ALL alpha matting completed');
+    } else {
+        // No alpha matting - process masks directly
+        console.log('Phase 3: Processing masks without alpha matting...');
+        for (let i = 0; i < images.length; i++) {
+            const img = images[i];
+            const masks = allMasks[i];
+            const cutouts: PILImage[] = [];
+
+            for (let mask of masks) {
+                if (post_process_mask) {
+                    mask = Image.fromarray(post_process(np.array(mask)));
+                }
+
+                let cutout: PILImage;
+
+                if (only_mask) {
+                    cutout = mask;
+                } else {
+                    cutout = putalpha_cutout(img, mask);
+                }
+
+                cutouts.push(cutout);
+            }
+            
+            allCutouts.push(cutouts);
+        }
+        console.log('Phase 3 complete: All masks processed');
+    }// Phase 4: Final result processing
+    console.log('Phase 4: Processing final results...');
     const results: (Uint8Array | PILImage | NumpyArray)[] = [];
     
     for (let i = 0; i < images.length; i++) {
@@ -349,12 +492,10 @@ async function remove(
         const cutouts = allCutouts[i];
         const return_type = returnTypes[i];
         
-        console.log(`Image ${i + 1}: Cutouts processed:`, cutouts.length);
         let cutout = img;
         if (cutouts.length > 0) {
             cutout = get_concat_v_multi(cutouts);
-            console.log(`Image ${i + 1}: Final cutout created, size:`, cutout.width, 'x', cutout.height);
-        }        // Final cutout is ready
+        }
 
         // Convert to appropriate return type
         if (ReturnType.PILLOW === return_type) {
@@ -372,7 +513,9 @@ async function remove(
             bio.seek(0);
             results.push(bio.read());
         }
-    }    // Return single result or batch based on input
+    }
+    
+    console.log('Phase 4 complete: All results processed');// Return single result or batch based on input
     if (isBatch) {
         return results;
     } else {
@@ -391,12 +534,17 @@ async function remove_video(
     post_process_mask = false,
     onProgress?: (current: number, total: number) => void,
     ...args: unknown[]
-): Promise<string> {
-    /**
-     * Remove the background from a video file.
+): Promise<string> {    /**
+     * Remove the background from a video file using a true pipeline approach.
      *
-     * This function processes each frame of a video through background removal,
-     * then reassembles them into a new video file.
+     * This function implements a 4-phase pipeline for video processing:
+     * Phase 1: Extract ALL video frames first
+     * Phase 2: Process ALL frames through the image pipeline (which itself follows the 4-phase approach)
+     * Phase 3: Add ALL processed frames to output video
+     * Phase 4: Export final video
+     * 
+     * This pipeline approach processes the entire video as one batch, which is much more
+     * efficient than processing small frame batches.
      * 
      * Parameters:
      *     data (File | Blob): The input video file.
@@ -419,48 +567,59 @@ async function remove_video(
     if (session === undefined) {
         session = new_session("u2net", ...args);
         await session.initialize();
-    }
-
-    // Create video processor
+    }    // Create video processor
     const processor = new VideoFrameProcessor(data);
     await processor.init();
-    console.log('remove_video: Video processor initialized');
-
-    let frameIndex = 0;
+    console.log('remove_video: Video processor initialized');    let frameIndex = 0;
     let frame: Uint8Array | null;
+    
+    // TRUE PIPELINE FOR VIDEO: Collect ALL frames first
+    console.log('remove_video: Phase 1 - Collecting all video frames...');
+    const allFrames: Uint8Array[] = [];
 
-    // Process each frame
     while ((frame = await processor.next()) !== null) {
         frameIndex++;
-        console.log(`remove_video: Processing frame ${frameIndex}`);
-          // Process frame through background removal
-        const processedFrame = await remove(
-            frame,
-            alpha_matting,
-            alpha_matting_foreground_threshold,
-            alpha_matting_background_threshold,
-            alpha_matting_erode_size,
-            session,
-            only_mask,
-            post_process_mask,
-            true // force_return_bytes
-        ) as Uint8Array;
-
-        // Add processed frame to video
-        await processor.push(processedFrame);
+        allFrames.push(frame);
         
-        // Report progress if callback provided
-        if (onProgress) {
+        if (onProgress && frameIndex % 10 === 0) {
             onProgress(frameIndex, frameIndex); // We don't know total until we finish
         }
     }
+    
+    console.log(`remove_video: Phase 1 complete - Collected ${allFrames.length} frames`);
+    
+    // Phase 2: Process ALL frames through the pipeline at once
+    console.log(`remove_video: Phase 2 - Processing all ${allFrames.length} frames through pipeline...`);
+    
+    const processedFrames = await remove(
+        allFrames,
+        alpha_matting,
+        alpha_matting_foreground_threshold,
+        alpha_matting_background_threshold,
+        alpha_matting_erode_size,
+        session,
+        only_mask,
+        post_process_mask,
+        true // force_return_bytes
+    ) as Uint8Array[];
 
-    console.log(`remove_video: Processed ${frameIndex} frames, exporting video`);
+    console.log(`remove_video: Phase 2 complete - Processed ${processedFrames.length} frames`);
+    
+    // Phase 3: Add all processed frames to output video
+    console.log('remove_video: Phase 3 - Adding processed frames to output video...');
+    for (let i = 0; i < processedFrames.length; i++) {
+        await processor.push(processedFrames[i]);
+        
+        if (onProgress && (i + 1) % 10 === 0) {
+            onProgress(allFrames.length + i + 1, allFrames.length * 2);
+        }
+    }    console.log(`remove_video: Phase 3 complete - Added ${processedFrames.length} processed frames to output`);
+    
+    console.log('remove_video: Phase 4 - Exporting final video...');
     
     // Export the final video
     const videoUrl = await processor.exportFinalVideo();
-    console.log('remove_video: Video processing completed');
-    
+    console.log('remove_video: Pipeline complete - Video processing finished');    
     return videoUrl;
 }
 
@@ -470,8 +629,7 @@ export {
     putalpha_cutout,
     get_concat_v_multi,
     get_concat_v,
-    post_process,
-    download_models,
+    post_process,    download_models,
     remove,
     remove_video,
 };

@@ -31,7 +31,7 @@
     "eject": "react-scripts eject",
     "test-import": "npx ts-node test-import.ts",
     "verify": "node verify-setup.js",
-    "download-models": "echo 'Please download models manually from GitHub releases to public/models/' && echo 'u2net.onnx: https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx' && echo 'u2netp.onnx: https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx'"
+    "download-models": "echo 'Please download models manually from GitHub releases to public/models/' && echo 'u2net.onnx: https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx'"
   },
   "eslintConfig": {
     "extends": [
