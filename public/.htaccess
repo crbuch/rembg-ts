@@ -1,0 +1,11 @@
+# Cache ONNX models for 1 year
+<FilesMatch "\.(onnx)$">
+    Header set Cache-Control "max-age=31536000, public, immutable"
+    Header set ETag ""
+    Header unset Last-Modified
+</FilesMatch>
+
+# Enable compression for ONNX files
+<FilesMatch "\.(onnx)$">
+    SetOutputFilter DEFLATE
+</FilesMatch>

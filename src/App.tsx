@@ -12,6 +12,12 @@ interface ProcessingStatus {
   downloadProgress?: { loaded: number; total: number };
 }
 
+interface CacheStatus {
+  modelsAvailable: boolean;
+  cachedModels: string[];
+  checkingCache: boolean;
+}
+
 type FileType = 'image' | 'video';
 
 function App() {
@@ -22,10 +28,66 @@ function App() {
     loading: false,
     error: null,
     success: false
-  });  const [useAlphaMatting, setUseAlphaMatting] = useState<boolean>(true);
+  });
+  const [useAlphaMatting, setUseAlphaMatting] = useState<boolean>(true);
+  const [cacheModels, setCacheModels] = useState<boolean>(true);
+  const [cacheStatus, setCacheStatus] = useState<CacheStatus>({
+    modelsAvailable: false,
+    cachedModels: [],
+    checkingCache: true
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
+
+  // Check cache status on component mount
+  React.useEffect(() => {
+    checkModelCacheStatus();
+  }, []);
+
+  const checkModelCacheStatus = async () => {
+    try {
+      setCacheStatus(prev => ({ ...prev, checkingCache: true }));
+      
+      // Check localStorage first
+      const modelsAreCached = localStorage.getItem('rembg-models-cached') === 'true';
+      
+      // Also check if service worker is available to get detailed status
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        const messageChannel = new MessageChannel();
+        
+        messageChannel.port1.onmessage = (event) => {
+          if (event.data.type === 'CACHE_STATUS') {
+            const cachedModels = event.data.results.filter((r: any) => r.cached);
+            setCacheStatus({
+              modelsAvailable: cachedModels.length === event.data.results.length,
+              cachedModels: cachedModels.map((r: any) => r.url),
+              checkingCache: false
+            });
+          }
+        };
+        
+        navigator.serviceWorker.controller.postMessage(
+          { type: 'CHECK_CACHE' },
+          [messageChannel.port2]
+        );
+      } else {
+        // Fallback when service worker is not available
+        setCacheStatus({
+          modelsAvailable: modelsAreCached,
+          cachedModels: modelsAreCached ? ['u2net'] : [],
+          checkingCache: false
+        });
+      }
+    } catch (error) {
+      console.error('Error checking cache status:', error);
+      setCacheStatus({
+        modelsAvailable: false,
+        cachedModels: [],
+        checkingCache: false
+      });
+    }
+  };
   const loadExampleImage = async () => {
     try {
       setStatus({ loading: true, error: null, success: false });
@@ -60,15 +122,24 @@ function App() {
       return;
     }
 
-    setStatus({ loading: true, error: null, success: false });    try {
+    setStatus({ loading: true, error: null, success: false });
+
+    try {
       console.log(`Starting ${inputFileType} processing...`);
-        // Create session for the u2net model with download progress callback
-      const session = await new_session_async('u2net', (loaded: number, total: number) => {
-        setStatus(prev => ({ 
-          ...prev, 
-          downloadProgress: { loaded, total } 
-        }));
-      });
+      
+      // Create session for the u2net model with download progress callback
+      // Only show download progress if models aren't already cached
+      const session = await new_session_async('u2net', 
+        !cacheStatus.modelsAvailable ? (loaded: number, total: number) => {
+          setStatus(prev => ({ 
+            ...prev, 
+            downloadProgress: { loaded, total } 
+          }));
+        } : undefined
+      );
+      
+      // Clear download progress once session is created
+      setStatus(prev => ({ ...prev, downloadProgress: undefined }));
       console.log('Session created successfully');
 
       if (inputFileType === 'image') {
@@ -147,6 +218,23 @@ function App() {
     <div className="App">      <header className="App-header">
         <h1>🎭 rembg-ts Demo</h1>
         <p>TypeScript Background Removal for Images & Videos in the Browser</p>
+        
+        {/* Cache Status Indicator */}
+        <div className="cache-status">
+          {cacheStatus.checkingCache ? (
+            <div className="cache-indicator checking">
+              <span>🔄 Checking cache...</span>
+            </div>
+          ) : cacheStatus.modelsAvailable ? (
+            <div className="cache-indicator cached">
+              <span>✅ Models cached - Fast processing ready!</span>
+            </div>
+          ) : (
+            <div className="cache-indicator not-cached">
+              <span>⏳ Models will be downloaded and cached on first use</span>
+            </div>
+          )}
+        </div>
       </header>
 
       <main className="App-main">        <div className="controls-section">
@@ -186,7 +274,8 @@ function App() {
               accept="video/*"
               onChange={(e) => handleFileSelect(e, 'video')}
               style={{ display: 'none' }}
-            />          </div>
+            />
+          </div>
 
           <h2>Step 2: Processing Options</h2>
           <div className="processing-options">
@@ -227,10 +316,24 @@ function App() {
                     {Math.round((status.downloadProgress.loaded / status.downloadProgress.total) * 100)}% 
                     ({(status.downloadProgress.loaded / 1024 / 1024).toFixed(1)}MB / {(status.downloadProgress.total / 1024 / 1024).toFixed(1)}MB)
                   </div>
+                  {/* Cache Models Checkbox */}
+                  <div className="cache-checkbox">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={cacheModels}
+                        onChange={(e) => setCacheModels(e.target.checked)}
+                      />
+                      Cache models for faster future use
+                    </label>
+                  </div>
                 </div>
               ) : (
                 <div>
-                  Processing {inputFileType} with U2Net{useAlphaMatting ? ' + Alpha Matting' : ''}...
+                  {cacheStatus.modelsAvailable ? 
+                    `Processing ${inputFileType} with U2Net${useAlphaMatting ? ' + Alpha Matting' : ''}...` :
+                    `Loading U2Net model and processing ${inputFileType}${useAlphaMatting ? ' with Alpha Matting' : ''}...`
+                  }
                   {status.progress && inputFileType === 'video' && (
                     <div>Frame {status.progress.current} processed</div>
                   )}

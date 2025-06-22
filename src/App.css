@@ -97,6 +97,18 @@
   background: #218838;
 }
 
+.btn-outline {
+  background: transparent;
+  color: #6c757d;
+  border: 2px solid #dee2e6;
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: #f8f9fa;
+  border-color: #adb5bd;
+  color: #495057;
+}
+
 .model-selector {
   display: flex;
   gap: 2rem;
@@ -305,4 +317,89 @@
 
 .checkbox-label input[type="checkbox"]:disabled {
   opacity: 0.6;
+}
+
+/* Cache Status Indicator */
+.cache-status {
+  margin-top: 1rem;
+}
+
+.cache-indicator {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.cache-indicator.cached {
+  background: rgba(46, 125, 50, 0.2);
+  color: #2e7d32;
+  border: 1px solid rgba(46, 125, 50, 0.3);
+}
+
+.cache-indicator.not-cached {
+  background: rgba(255, 193, 7, 0.2);
+  color: #f57c00;
+  border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.cache-indicator.checking {
+  background: rgba(33, 150, 243, 0.2);
+  color: #1976d2;
+  border: 1px solid rgba(33, 150, 243, 0.3);
+}
+
+.cache-indicator span {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Cache Management */
+.cache-management {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+  text-align: center;
+}
+
+.cache-management h3 {
+  margin: 0 0 0.5rem 0;
+  color: #495057;
+  font-size: 1.1rem;
+}
+
+.cache-management p {
+  margin: 0 0 1rem 0;
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+/* Cache checkbox in status section */
+.cache-checkbox {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.cache-checkbox .checkbox-label {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #1976d2;
+  font-size: 0.9rem;
+  padding: 0.5rem 1rem;
+  justify-content: center;
+}
+
+.cache-checkbox .checkbox-label:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.cache-checkbox input[type="checkbox"] {
+  accent-color: #1976d2;
 }
